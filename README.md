@@ -1,3 +1,9 @@
+Slightly modified version of MicroSocks to bypass DPI
+===========================================================
+
+$ docker run -d --restart=always -p 8880:8880 nomoredpi/proxy
+
+
 MicroSocks - multithreaded, small, efficient SOCKS5 server.
 ===========================================================
 
