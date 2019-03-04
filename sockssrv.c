@@ -35,6 +35,9 @@
 #include <limits.h>
 #include "server.h"
 #include "sblist.h"
+#include <linux/socket.h>
+#include <netinet/tcp.h>
+
 
 #ifndef MAX
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -244,6 +247,14 @@ static void copyloop(int fd1, int fd2) {
 	FD_SET(fd1, &fdsc);
 	FD_SET(fd2, &fdsc);
 
+	int early_stage = 1;
+	int transferred = 0;
+
+	// int enable = 1;
+	// int disable = 0;
+
+	// setsockopt(fd2, IPPROTO_TCP, TCP_NODELAY, (char *) &enable, sizeof(int));
+
 	while(1) {
 		memcpy(&fds, &fdsc, sizeof(fds));
 		/* inactive connections are reaped after 15 min to free resources.
@@ -261,13 +272,30 @@ static void copyloop(int fd1, int fd2) {
 		}
 		int infd = FD_ISSET(fd1, &fds) ? fd1 : fd2;
 		int outfd = infd == fd2 ? fd1 : fd2;
-		char buf[1024];
+		char buf[4096];
 		ssize_t sent = 0, n = read(infd, buf, sizeof buf);
 		if(n <= 0) return;
-		while(sent < n) {
-			ssize_t m = write(outfd, buf+sent, n-sent);
+		if(infd == fd2) { // from remote
+			ssize_t m = write(outfd, buf+sent, n - sent);
 			if(m < 0) return;
 			sent += m;
+		} else {
+			// from client
+			while(sent < n) {
+				ssize_t sz = n - sent;
+				if (early_stage && sz > 256) {
+					sz = 256;
+				}
+				ssize_t m = write(outfd, buf+sent, sz);
+				if(m < 0) return;
+				sent += m;
+				transferred += m;
+
+				if (early_stage && transferred > 1024) {
+					early_stage = 0;
+					// setsockopt(fd2, IPPROTO_TCP, TCP_NODELAY, (char *) &disable, sizeof(int));
+				}
+			}
 		}
 	}
 }
@@ -353,7 +381,7 @@ static void collect(sblist *threads) {
 
 static int usage(void) {
 	dprintf(2,
-		"MicroSocks SOCKS5 Server\n"
+		"MicroSocks SOCKS5 Server (with no dpi)\n"
 		"------------------------\n"
 		"usage: microsocks -1 -i listenip -p port -u user -P password -b bindaddr\n"
 		"all arguments are optional.\n"
@@ -422,6 +450,7 @@ int main(int argc, char** argv) {
 		perror("server_setup");
 		return 1;
 	}
+	dprintf(2, "starting...\n");
 	server = &s;
 	size_t stacksz = MAX(8192, PTHREAD_STACK_MIN);  /* 4KB for us, 4KB for libc */
 
